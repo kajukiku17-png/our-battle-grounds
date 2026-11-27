@@ -1494,8 +1494,8 @@ on conflict (id) do nothing;`;
                       <label for="gateSignUpRole" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Role</label>
                       <select id="gateSignUpRole" class="field-input">
                         <option value="Me">Me</option>
-                        <option value="Partner">Partner</option>
-                        <option value="Friend">Friend</option>
+                        <option value="Queen Ari">Queen Ari</option>
+                        <option value="Buddy">Buddy</option>
                       </select>
                     </div>
                   </div>
@@ -2442,7 +2442,7 @@ on conflict (id) do nothing;`;
                   <div>
                     <label for="profileRoleInput" class="block text-xs font-semibold mb-1.5" style="color: var(--ink-secondary);">Space Role</label>
                     <select id="profileRoleInput" class="field-input">
-                      ${["Me", "Partner", "Friend", "Study Buddy"].map((r) => `<option value="${r}" ${user.role === r ? "selected" : ""}>${r}</option>`).join("")}
+                      ${["Me", "Queen Ari", "Buddy"].map((r) => `<option value="${r}" ${user.role === r ? "selected" : ""}>${r}</option>`).join("")}
                     </select>
                   </div>
                 </div>
@@ -2827,9 +2827,9 @@ on conflict (id) do nothing;`;
               <div>
                 <label for="joinRoleInput" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Relationship</label>
                 <select id="joinRoleInput" class="field-input">
-                  <option value="Friend">Friend</option>
-                  <option value="Partner">Partner</option>
-                  <option value="Study Buddy">Study Buddy</option>
+                  <option value="Buddies">Buddies</option>
+                  <option value="Ari">Ari</option>
+                  <option value="Me">Me</option>
                 </select>
               </div>
               <div>
