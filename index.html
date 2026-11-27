@@ -100,6 +100,7 @@
     html {
       scroll-behavior: smooth;
       -webkit-tap-highlight-color: transparent;
+      overflow-x: clip;
     }
 
     body {
@@ -109,7 +110,8 @@
       color: var(--ink-primary);
       line-height: 1.5;
       min-height: 100vh;
-      overflow-x: hidden;
+      min-height: 100dvh;
+      overflow-x: clip;
       caret-color: var(--accent-rose);
       transition: background-color 0.25s ease, color 0.25s ease;
     }
@@ -334,9 +336,35 @@
       animation: toastIn 0.24s ease forwards;
     }
 
-    /* Mobile bottom safe area */
+    /* Mobile bottom navigation & responsive lock */
     .safe-bottom {
-      padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+      padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+    }
+    .mobile-bottom-nav {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 45;
+      transform: translate3d(0, 0, 0);
+      -webkit-transform: translate3d(0, 0, 0);
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+      will-change: transform;
+      padding-bottom: max(0.45rem, env(safe-area-inset-bottom, 0px));
+      box-shadow: 0 -6px 24px -10px rgba(58, 37, 27, 0.14);
+    }
+    .mobile-nav-btn {
+      min-width: 0;
+      touch-action: manipulation;
+    }
+    @media (max-width: 767px) {
+      .field-input {
+        font-size: 16px;
+      }
+      #appMain {
+        padding-bottom: calc(5.75rem + env(safe-area-inset-bottom, 0px));
+      }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -359,8 +387,8 @@
   <header class="sticky top-0 z-40 border-b" style="background: var(--header-glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-color: var(--border-warm);">
     <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
       <!-- Brand -->
-      <button type="button" id="brandHomeBtn" class="flex items-center gap-2.5 text-left group shrink-0">
-        <span class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm transition-transform group-hover:scale-105" style="background: var(--accent-coffee); color: #FFFDF9;">
+      <button type="button" id="brandHomeBtn" class="flex items-center gap-2 sm:gap-2.5 text-left group min-w-0">
+        <span class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center shadow-sm transition-transform group-hover:scale-105 shrink-0" style="background: var(--accent-coffee); color: #FFFDF9;">
           <!-- Custom Cute Coffee-Heart Brand SVG -->
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M17 8h1a4 4 0 1 1 0 8h-1"/>
@@ -368,8 +396,8 @@
             <path d="M10 11.2c-.6-.9-2-.9-2.5 0-.5.8 0 2.1 2.5 3.3 2.5-1.2 3-2.5 2.5-3.3-.5-.9-1.9-.9-2.5 0Z" fill="#E6B3BA" stroke="none"/>
           </svg>
         </span>
-        <div class="leading-tight">
-          <span class="font-display font-semibold text-base sm:text-lg block tracking-tight" style="color: var(--ink-primary);">OUR Battle Grounds</span>
+        <div class="leading-tight min-w-0">
+          <span class="font-display font-semibold text-sm sm:text-lg block tracking-tight truncate" style="color: var(--ink-primary);">OUR Battle Grounds</span>
         </div>
       </button>
 
@@ -418,35 +446,36 @@
   </header>
 
   <!-- Main App Container -->
-  <main id="appMain" class="max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-24 md:pb-12">
+  <main id="appMain" class="max-w-6xl mx-auto px-3.5 sm:px-6 pt-4 sm:pt-5 pb-28 md:pb-12">
     <!-- Dynamic view injected here -->
   </main>
 
   <!-- Mobile Bottom Navigation -->
-  <nav aria-label="Mobile navigation" class="md:hidden fixed bottom-0 inset-x-0 z-40 border-t safe-bottom" style="background: var(--nav-glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-color: var(--border-warm);">
-    <div class="grid grid-cols-6 px-1 pt-1.5">
-      <button type="button" data-nav="dashboard" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl gap-0.5 text-[11px] font-semibold" style="color: var(--ink-muted);">
-        <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+  <nav aria-label="Mobile navigation" class="md:hidden mobile-bottom-nav border-t" style="background: var(--nav-glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-color: var(--border-warm);">
+    <div class="grid grid-cols-6 gap-0.5 px-1 pt-1.5 max-w-lg mx-auto">
+      <button type="button" data-nav="dashboard" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl gap-0.5 text-[10px] sm:text-[11px] leading-tight font-semibold whitespace-nowrap" style="color: var(--ink-muted);">
+        <i data-lucide="layout-dashboard" class="w-[18px] h-[18px] sm:w-5 sm:h-5"></i>
         <span>Home</span>
       </button>
-      <button type="button" data-nav="tasks" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl gap-0.5 text-[11px] font-semibold" style="color: var(--ink-muted);">
-        <i data-lucide="check-square" class="w-5 h-5"></i>
+      <button type="button" data-nav="tasks" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl gap-0.5 text-[10px] sm:text-[11px] leading-tight font-semibold whitespace-nowrap" style="color: var(--ink-muted);">
+        <i data-lucide="check-square" class="w-[18px] h-[18px] sm:w-5 sm:h-5"></i>
         <span>Tasks</span>
       </button>
-      <button type="button" data-nav="focus" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl gap-0.5 text-[11px] font-semibold" style="color: var(--ink-muted);">
-        <i data-lucide="timer" class="w-5 h-5"></i>
+      <button type="button" data-nav="focus" class="mobile-nav-btn relative flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl gap-0.5 text-[10px] sm:text-[11px] leading-tight font-semibold whitespace-nowrap" style="color: var(--ink-muted);">
+        <span id="focusNavDotMobile" class="hidden absolute top-1 right-2.5 w-2 h-2 rounded-full animate-pulse" style="background: var(--accent-sage);"></span>
+        <i data-lucide="timer" class="w-[18px] h-[18px] sm:w-5 sm:h-5"></i>
         <span>Focus</span>
       </button>
-      <button type="button" data-nav="leaderboard" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl gap-0.5 text-[11px] font-semibold" style="color: var(--accent-rose);">
-        <i data-lucide="trophy" class="w-5 h-5"></i>
+      <button type="button" data-nav="leaderboard" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl gap-0.5 text-[10px] sm:text-[11px] leading-tight font-semibold whitespace-nowrap" style="color: var(--accent-rose);">
+        <i data-lucide="trophy" class="w-[18px] h-[18px] sm:w-5 sm:h-5"></i>
         <span>Ranks</span>
       </button>
-      <button type="button" data-nav="shared" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl gap-0.5 text-[11px] font-semibold" style="color: var(--ink-muted);">
-        <i data-lucide="users" class="w-5 h-5"></i>
+      <button type="button" data-nav="shared" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl gap-0.5 text-[10px] sm:text-[11px] leading-tight font-semibold whitespace-nowrap" style="color: var(--ink-muted);">
+        <i data-lucide="users" class="w-[18px] h-[18px] sm:w-5 sm:h-5"></i>
         <span>Shared</span>
       </button>
-      <button type="button" data-nav="profile" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl gap-0.5 text-[11px] font-semibold" style="color: var(--ink-muted);">
-        <i data-lucide="user-circle" class="w-5 h-5"></i>
+      <button type="button" data-nav="profile" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl gap-0.5 text-[10px] sm:text-[11px] leading-tight font-semibold whitespace-nowrap" style="color: var(--ink-muted);">
+        <i data-lucide="user-circle" class="w-[18px] h-[18px] sm:w-5 sm:h-5"></i>
         <span>Profile</span>
       </button>
     </div>
@@ -2474,6 +2503,8 @@ on conflict (id) do nothing;`;
       function updateFocusNavIndicator() {
         const dot = document.getElementById("focusNavDot");
         if (dot) dot.classList.toggle("hidden", !focusState.running);
+        const dotMobile = document.getElementById("focusNavDotMobile");
+        if (dotMobile) dotMobile.classList.toggle("hidden", !focusState.running);
       }
 
       function getCurrentFocusParticipants() {
