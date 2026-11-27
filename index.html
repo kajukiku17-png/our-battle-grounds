@@ -383,6 +383,11 @@
           <i data-lucide="check-square" class="w-4 h-4"></i>
           <span>Tasks</span>
         </button>
+        <button type="button" data-nav="focus" class="nav-pill px-3.5 py-2 flex items-center gap-1.5">
+          <i data-lucide="timer" class="w-4 h-4"></i>
+          <span>Focus</span>
+          <span id="focusNavDot" class="hidden w-2 h-2 rounded-full animate-pulse" style="background: var(--accent-sage);"></span>
+        </button>
         <button type="button" data-nav="leaderboard" class="nav-pill nav-pill-leaderboard px-4 py-2 flex items-center gap-1.5 tracking-wide">
           <i data-lucide="trophy" class="w-4 h-4"></i>
           <span>LEADERBOARD</span>
@@ -419,7 +424,7 @@
 
   <!-- Mobile Bottom Navigation -->
   <nav aria-label="Mobile navigation" class="md:hidden fixed bottom-0 inset-x-0 z-40 border-t safe-bottom" style="background: var(--nav-glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-color: var(--border-warm);">
-    <div class="grid grid-cols-5 px-1 pt-1.5">
+    <div class="grid grid-cols-6 px-1 pt-1.5">
       <button type="button" data-nav="dashboard" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl gap-0.5 text-[11px] font-semibold" style="color: var(--ink-muted);">
         <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
         <span>Home</span>
@@ -427,6 +432,10 @@
       <button type="button" data-nav="tasks" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl gap-0.5 text-[11px] font-semibold" style="color: var(--ink-muted);">
         <i data-lucide="check-square" class="w-5 h-5"></i>
         <span>Tasks</span>
+      </button>
+      <button type="button" data-nav="focus" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl gap-0.5 text-[11px] font-semibold" style="color: var(--ink-muted);">
+        <i data-lucide="timer" class="w-5 h-5"></i>
+        <span>Focus</span>
       </button>
       <button type="button" data-nav="leaderboard" class="mobile-nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl gap-0.5 text-[11px] font-semibold" style="color: var(--accent-rose);">
         <i data-lucide="trophy" class="w-5 h-5"></i>
@@ -548,7 +557,7 @@
               id: partnerId,
               username: "Partner",
               email: "partner@ourbattlegrounds.app",
-              role: "Partner",
+              role: "Ari",
               bio: "Headphones on, deep-focus playlist running, always ready for a rematch.",
               avatar: DEFAULT_ASSETS.partner,
               cover: DEFAULT_ASSETS.cover,
@@ -559,7 +568,7 @@
               id: friendId,
               username: "Maya",
               email: "maya@ourbattlegrounds.app",
-              role: "Friend",
+              role: "Buddies",
               bio: "Matcha enthusiast, sketchbook collector, and weekend study buddy.",
               avatar: DEFAULT_ASSETS.friend,
               cover: DEFAULT_ASSETS.cover,
@@ -833,6 +842,30 @@
       let leaderboardRange = "weekly"; // "weekly" | "all"
       let authGateTab = "signin"; // "signin" | "signup"
       let friendSearchQuery = "";
+      const FOCUS_ROOMS_STORAGE_KEY = "obg_focus_rooms_v1";
+      let focusTimerInterval = null;
+      let focusPresenceChannel = null;
+      let focusState = {
+        roomCode: null,
+        roomName: "",
+        mode: "focus",
+        durationSec: 25 * 60,
+        remainingSec: 25 * 60,
+        running: false,
+        goal: "",
+        selectedCreateMin: 25,
+        sessionsDone: 0,
+        minutesDone: 0,
+        participants: [],
+        recentRooms: (() => {
+          try {
+            const raw = localStorage.getItem(FOCUS_ROOMS_STORAGE_KEY);
+            return raw ? JSON.parse(raw) : [];
+          } catch (e) {
+            return [];
+          }
+        })()
+      };
 
       // Supabase live client state
       let supabaseClient = null;
@@ -889,7 +922,7 @@
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text not null,
-  role text default 'Friend',
+  role text default 'Buddies',
   bio text default '',
   avatar_url text default '',
   cover_url text default '',
@@ -981,17 +1014,21 @@ on conflict (id) do nothing;`;
             supabaseClient.from("tasks").select("*").order("created_at", { ascending: false })
           ]);
           if (Array.isArray(profiles) && profiles.length > 0) {
+            const currentLocal = state.users.find((u) => u.id === state.activeUserId);
             state.users = profiles.map((p) => ({
               id: p.id,
               username: p.username || "Member",
-              email: p.email || "",
-              role: p.role || "Friend",
+              email: p.email || (currentLocal && currentLocal.id === p.id ? currentLocal.email : ""),
+              role: p.role || "Buddies",
               bio: p.bio || "",
               avatar: p.avatar_url || DEFAULT_ASSETS.me,
               cover: p.cover_url || DEFAULT_ASSETS.cover,
               theme: p.theme || "cream-latte",
               cheers: p.cheers || 0
             }));
+            if (currentLocal && !state.users.some((u) => u.id === currentLocal.id)) {
+              state.users.push(currentLocal);
+            }
           }
           if (Array.isArray(tasks)) {
             state.tasks = tasks.map((t) => ({
@@ -1052,7 +1089,10 @@ on conflict (id) do nothing;`;
           const redirectUrl = window.location.href.split("#")[0];
           const { error } = await supabaseClient.auth.signInWithOAuth({
             provider: "google",
-            options: { redirectTo: redirectUrl }
+            options: {
+              redirectTo: redirectUrl,
+              queryParams: { prompt: "select_account" }
+            }
           });
           if (error) showToast(error.message || "Google sign-in failed.");
         } catch (err) {
@@ -1064,13 +1104,36 @@ on conflict (id) do nothing;`;
         if (!session || !session.user || !supabaseClient) return;
         const u = session.user;
         const meta = u.user_metadata || {};
-        const displayName = meta.full_name || meta.name || (u.email ? u.email.split("@")[0] : "Member");
+        const email = (u.email || "").trim().toLowerCase();
+        const displayName = meta.full_name || meta.name || (email ? email.split("@")[0] : "Member");
         const avatarUrl = meta.avatar_url || meta.picture || DEFAULT_ASSETS.me;
+
+        // Ensure this Google account exists in local state.users so getActiveUser() never falls back to demo "Me"
+        let existing = state.users.find((x) => x.id === u.id || (email && (x.email || "").toLowerCase() === email));
+        if (existing) {
+          existing.id = u.id;
+          existing.email = email || existing.email;
+          if (!existing.username || existing.username === "Member") existing.username = displayName;
+          if (meta.avatar_url || meta.picture) existing.avatar = avatarUrl;
+        } else {
+          state.users.push({
+            id: u.id,
+            username: displayName,
+            email: email,
+            role: "Buddies",
+            bio: "Signed in with Google.",
+            avatar: avatarUrl,
+            cover: DEFAULT_ASSETS.cover,
+            theme: "cream-latte",
+            cheers: 0
+          });
+        }
+
         try {
           await supabaseClient.from("profiles").upsert({
             id: u.id,
             username: displayName,
-            role: "Friend",
+            role: existing ? (existing.role || "Buddies") : "Buddies",
             avatar_url: avatarUrl,
             updated_at: new Date().toISOString()
           }, { onConflict: "id" });
@@ -1078,6 +1141,7 @@ on conflict (id) do nothing;`;
         state.activeUserId = u.id;
         state.isAuthenticated = true;
         saveState();
+        renderApp(true);
       }
 
       async function initSupabaseConnection(url, anonKey, silent = false) {
@@ -1122,7 +1186,7 @@ on conflict (id) do nothing;`;
           await supabaseClient.from("profiles").upsert({
             id: user.id,
             username: user.username,
-            role: user.role || "Friend",
+            role: user.role || "Buddies",
             bio: user.bio || "",
             avatar_url: user.avatar || "",
             cover_url: user.cover || "",
@@ -1390,6 +1454,7 @@ on conflict (id) do nothing;`;
       let lastRenderedView = null;
 
       async function signOutUser() {
+        leaveFocusRoom(true);
         if (supabaseConnected && supabaseClient) {
           try {
             await supabaseClient.auth.signOut();
@@ -1493,9 +1558,9 @@ on conflict (id) do nothing;`;
                     <div>
                       <label for="gateSignUpRole" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Role</label>
                       <select id="gateSignUpRole" class="field-input">
+                        <option value="Ari">Ari</option>
                         <option value="Me">Me</option>
-                        <option value="Queen Ari">Queen Ari</option>
-                        <option value="Buddy">Buddy</option>
+                        <option value="Buddies">Buddies</option>
                       </select>
                     </div>
                   </div>
@@ -1639,6 +1704,8 @@ on conflict (id) do nothing;`;
           main.innerHTML = renderDashboardView();
         } else if (currentView === "tasks") {
           main.innerHTML = renderTasksView();
+        } else if (currentView === "focus") {
+          main.innerHTML = renderFocusView();
         } else if (currentView === "leaderboard") {
           main.innerHTML = renderLeaderboardView();
         } else if (currentView === "shared") {
@@ -2355,7 +2422,7 @@ on conflict (id) do nothing;`;
                               ${escapeHtml(member.username)}
                               ${isMe ? `<span class="text-xs font-medium ml-1" style="color: var(--accent-rose);">(Active)</span>` : ""}
                             </div>
-                            <div class="text-xs" style="color: var(--ink-muted);">${escapeHtml(member.role || "Friend")}</div>
+                            <div class="text-xs" style="color: var(--ink-muted);">${escapeHtml(member.role || "Buddies")}</div>
                           </div>
                         </div>
                         ${!isMe ? `<button type="button" data-remove-member="${escapeHtml(member.id)}" class="p-1.5 rounded-xl hover:bg-black/5 shrink-0" title="Remove member" aria-label="Remove ${escapeHtml(member.username)}"><i data-lucide="user-minus" class="w-4 h-4" style="color: var(--ink-muted);"></i></button>` : ""}
@@ -2379,6 +2446,536 @@ on conflict (id) do nothing;`;
                 }).join("")}
               </div>
             </section>
+          </div>
+        `;
+      }
+
+      /* ---------- VIEW 3B: FOCUS SESSION ROOMS ---------- */
+      function saveRecentFocusRooms() {
+        try {
+          localStorage.setItem(FOCUS_ROOMS_STORAGE_KEY, JSON.stringify(focusState.recentRooms.slice(0, 5)));
+        } catch (e) {}
+      }
+
+      function generateFocusRoomCode() {
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        let code = "FOCUS-";
+        for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+        return code;
+      }
+
+      function formatFocusClock(totalSec) {
+        const s = Math.max(0, Math.floor(totalSec));
+        const m = Math.floor(s / 60);
+        const rem = s % 60;
+        return `${String(m).padStart(2, "0")}:${String(rem).padStart(2, "0")}`;
+      }
+
+      function updateFocusNavIndicator() {
+        const dot = document.getElementById("focusNavDot");
+        if (dot) dot.classList.toggle("hidden", !focusState.running);
+      }
+
+      function getCurrentFocusParticipants() {
+        const me = getActiveUser();
+        const mePayload = {
+          id: me.id,
+          username: me.username,
+          role: me.role || "Buddies",
+          avatar: me.avatar || DEFAULT_ASSETS.me,
+          goal: focusState.goal || "Focusing quietly",
+          status: focusState.running ? (focusState.mode === "break" ? "break" : "studying") : "paused",
+          mode: focusState.mode
+        };
+        const map = new Map();
+        (focusState.participants || []).forEach((p) => {
+          if (p && p.id) map.set(p.id, p);
+        });
+        map.set(me.id, mePayload);
+        return Array.from(map.values());
+      }
+
+      function renderFocusParticipantsHtml() {
+        const me = getActiveUser();
+        const list = getCurrentFocusParticipants();
+        return list.map((p) => {
+          const isMe = p.id === me.id;
+          const isStudying = p.status === "studying";
+          const isBreak = p.status === "break";
+          const dotColor = isStudying ? "var(--accent-sage)" : (isBreak ? "var(--accent-honey)" : "var(--ink-muted)");
+          const statusLabel = isStudying ? "Studying" : (isBreak ? "On Break" : "Ready");
+          return `
+            <div class="flex items-center gap-3 p-3 rounded-2xl border" style="background: var(--bg-elevated); border-color: ${isStudying ? "var(--accent-sage)" : "var(--border-warm)"};">
+              <div class="relative shrink-0">
+                <img src="${escapeHtml(p.avatar || DEFAULT_ASSETS.me)}" alt="${escapeHtml(p.username)}" class="w-10 h-10 rounded-full object-cover border" style="border-color: var(--border-warm);" />
+                <span class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 ${isStudying ? "animate-pulse" : ""}" style="background: ${dotColor}; border-color: var(--bg-elevated);" title="${statusLabel}"></span>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-sm font-semibold truncate" style="color: var(--ink-primary);">${escapeHtml(p.username)}${isMe ? " (You)" : ""}</span>
+                  <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full surface-beige shrink-0" style="color: var(--ink-secondary);">${escapeHtml(p.role || "Buddies")}</span>
+                </div>
+                <div class="text-xs truncate mt-0.5" style="color: var(--ink-muted);">${escapeHtml(p.goal || "Focusing quietly")}</div>
+                <div class="text-[11px] font-semibold mt-0.5" style="color: ${dotColor};">${statusLabel}</div>
+              </div>
+              ${!isMe ? `
+                <button type="button" data-focus-cheer="${escapeHtml(p.id)}" class="p-2 rounded-xl border hover:scale-105 transition-transform shrink-0" style="background: var(--accent-rose-soft); border-color: var(--accent-pink); color: var(--accent-rose);" title="Send study cheer">
+                  <i data-lucide="heart" class="w-3.5 h-3.5"></i>
+                </button>
+              ` : ""}
+            </div>
+          `;
+        }).join("");
+      }
+
+      function refreshFocusParticipantsDOM() {
+        const container = document.getElementById("focusParticipantsList");
+        const countEl = document.getElementById("focusParticipantCount");
+        if (!container) return;
+        const list = getCurrentFocusParticipants();
+        if (countEl) {
+          const studyingCount = list.filter((p) => p.status === "studying").length;
+          countEl.textContent = studyingCount > 0 ? `${studyingCount} studying · ${list.length} in room` : `${list.length} in room`;
+        }
+        container.innerHTML = renderFocusParticipantsHtml();
+        if (window.lucide) lucide.createIcons();
+        container.querySelectorAll("[data-focus-cheer]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const targetId = btn.getAttribute("data-focus-cheer");
+            const member = state.users.find((u) => u.id === targetId);
+            if (member) {
+              member.cheers = (member.cheers || 0) + 1;
+              saveState();
+              syncProfileToSupabase(member);
+            }
+            showToast("Sent a quiet study cheer!");
+          });
+        });
+      }
+
+      async function broadcastFocusPresence() {
+        if (!focusPresenceChannel) {
+          refreshFocusParticipantsDOM();
+          return;
+        }
+        const me = getActiveUser();
+        if (!me) return;
+        const safeAvatar = (me.avatar && /^https?:\/\//i.test(me.avatar)) ? me.avatar : "";
+        try {
+          await focusPresenceChannel.track({
+            id: me.id,
+            username: me.username || "Member",
+            role: me.role || "Buddies",
+            avatar: safeAvatar,
+            goal: focusState.goal || "Focusing quietly",
+            status: focusState.running ? (focusState.mode === "break" ? "break" : "studying") : "paused",
+            mode: focusState.mode,
+            joinedAt: Date.now()
+          });
+        } catch (e) {}
+        refreshFocusParticipantsDOM();
+      }
+
+      function subscribeFocusPresence(roomCode) {
+        if (focusPresenceChannel && supabaseClient) {
+          try { supabaseClient.removeChannel(focusPresenceChannel); } catch (e) {}
+          focusPresenceChannel = null;
+        }
+        if (!supabaseConnected || !supabaseClient || !roomCode) return;
+        try {
+          const me = getActiveUser();
+          if (!me) return;
+          const ch = supabaseClient.channel(`focus-room-${roomCode}`, {
+            config: { presence: { key: String(me.id) } }
+          });
+          ch.on("presence", { event: "sync" }, () => {
+            try {
+              const rawState = ch.presenceState();
+              const list = [];
+              Object.values(rawState || {}).forEach((entries) => {
+                if (Array.isArray(entries) && entries.length > 0) {
+                  const latest = entries[entries.length - 1];
+                  const localMatch = state.users.find((u) => u.id === latest.id);
+                  list.push({
+                    ...latest,
+                    avatar: latest.avatar || (localMatch && localMatch.avatar) || DEFAULT_ASSETS.me
+                  });
+                }
+              });
+              focusState.participants = list;
+              refreshFocusParticipantsDOM();
+            } catch (e) {}
+          });
+          ch.subscribe(async (status) => {
+            if (status === "SUBSCRIBED") {
+              await broadcastFocusPresence();
+            }
+          });
+          focusPresenceChannel = ch;
+        } catch (e) {
+          focusPresenceChannel = null;
+        }
+      }
+
+      function updateFocusTimerDOM() {
+        const display = document.getElementById("focusTimerDisplay");
+        const ring = document.getElementById("focusTimerRing");
+        const statusEl = document.getElementById("focusTimerStatusLabel");
+        const toggleBtn = document.getElementById("focusToggleBtn");
+        if (display) display.textContent = formatFocusClock(focusState.remainingSec);
+        if (ring) {
+          const r = 94;
+          const circ = 2 * Math.PI * r;
+          const pct = focusState.durationSec > 0 ? Math.max(0, Math.min(1, focusState.remainingSec / focusState.durationSec)) : 0;
+          ring.style.strokeDashoffset = String(circ * (1 - pct));
+        }
+        if (statusEl) {
+          statusEl.textContent = focusState.running
+            ? (focusState.mode === "break" ? "Recharging on break" : "Deep focus in progress")
+            : (focusState.remainingSec === 0 ? "Session complete!" : "Ready when you are");
+        }
+        if (toggleBtn) {
+          toggleBtn.innerHTML = focusState.running
+            ? `<i data-lucide="pause" class="w-4 h-4"></i><span>Pause</span>`
+            : `<i data-lucide="play" class="w-4 h-4"></i><span>${focusState.remainingSec < focusState.durationSec && focusState.remainingSec > 0 ? "Resume" : "Start Focus"}</span>`;
+          if (window.lucide) lucide.createIcons();
+        }
+        updateFocusNavIndicator();
+      }
+
+      function stopFocusTimerInterval() {
+        if (focusTimerInterval) {
+          clearInterval(focusTimerInterval);
+          focusTimerInterval = null;
+        }
+      }
+
+      function toggleFocusTimer() {
+        if (!focusState.roomCode) return;
+        if (focusState.running) {
+          focusState.running = false;
+          stopFocusTimerInterval();
+          updateFocusTimerDOM();
+          broadcastFocusPresence();
+          return;
+        }
+        if (focusState.remainingSec <= 0) {
+          focusState.remainingSec = focusState.durationSec;
+        }
+        focusState.running = true;
+        updateFocusTimerDOM();
+        broadcastFocusPresence();
+        stopFocusTimerInterval();
+        focusTimerInterval = setInterval(() => {
+          if (!focusState.running) return;
+          focusState.remainingSec -= 1;
+          if (focusState.remainingSec <= 0) {
+            focusState.remainingSec = 0;
+            focusState.running = false;
+            stopFocusTimerInterval();
+            if (focusState.mode !== "break") {
+              focusState.sessionsDone += 1;
+              focusState.minutesDone += Math.round(focusState.durationSec / 60);
+            }
+            celebrateCompletion();
+            showToast(focusState.mode === "break" ? "Break finished! Ready for the next round?" : "Focus session complete! Great work.");
+            broadcastFocusPresence();
+            if (currentView === "focus") renderApp(false);
+            else updateFocusNavIndicator();
+            return;
+          }
+          updateFocusTimerDOM();
+        }, 1000);
+      }
+
+      function setFocusTimerMode(mode, minutes) {
+        stopFocusTimerInterval();
+        focusState.running = false;
+        focusState.mode = mode;
+        focusState.durationSec = Math.max(1, Math.min(240, minutes)) * 60;
+        focusState.remainingSec = focusState.durationSec;
+        broadcastFocusPresence();
+        if (currentView === "focus") renderApp(false);
+      }
+
+      function joinFocusRoom(code, roomName, durationMin = 25, goal = "") {
+        const cleanCode = String(code || "").trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
+        if (!cleanCode) {
+          showToast("Enter a valid room code to join.");
+          return;
+        }
+        stopFocusTimerInterval();
+        focusState.roomCode = cleanCode;
+        focusState.roomName = (roomName || "").trim() || `Study Room ${cleanCode}`;
+        focusState.mode = durationMin === 50 ? "deep" : (durationMin === 5 ? "break" : "focus");
+        focusState.durationSec = Math.max(1, Math.min(240, Number(durationMin) || 25)) * 60;
+        focusState.remainingSec = focusState.durationSec;
+        focusState.running = false;
+        focusState.goal = (goal || "").trim();
+        focusState.participants = [];
+
+        focusState.recentRooms = [
+          { code: cleanCode, name: focusState.roomName },
+          ...focusState.recentRooms.filter((r) => r.code !== cleanCode)
+        ].slice(0, 5);
+        saveRecentFocusRooms();
+
+        subscribeFocusPresence(cleanCode);
+        showToast(`Joined ${focusState.roomName} (${cleanCode})`);
+        renderApp(false);
+      }
+
+      function leaveFocusRoom(silent = false) {
+        stopFocusTimerInterval();
+        if (focusPresenceChannel && supabaseClient) {
+          try { supabaseClient.removeChannel(focusPresenceChannel); } catch (e) {}
+          focusPresenceChannel = null;
+        }
+        focusState.roomCode = null;
+        focusState.running = false;
+        focusState.participants = [];
+        updateFocusNavIndicator();
+        if (!silent) {
+          showToast("Left focus room.");
+          if (currentView === "focus") renderApp(false);
+        }
+      }
+
+      function renderFocusView() {
+        const user = getActiveUser();
+
+        // Lobby view: Create Room or Join Room
+        if (!focusState.roomCode) {
+          return `
+            <div class="view-enter space-y-6">
+              <section class="surface-card p-6 sm:p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full mb-2" style="background: var(--accent-sage-soft); color: var(--accent-sage);">
+                    <i data-lucide="timer" class="w-3.5 h-3.5"></i>
+                    Live Study Rooms
+                  </span>
+                  <h1 class="font-display text-2xl sm:text-3xl font-semibold" style="color: var(--ink-primary);">Focus Session</h1>
+                  <p class="text-sm mt-1" style="color: var(--ink-secondary);">Create a cozy study room or join a friend's room with their code to focus side by side.</p>
+                </div>
+                <div class="flex items-center gap-3 shrink-0">
+                  <div class="surface-beige rounded-2xl px-4 py-2.5 text-center">
+                    <div class="text-lg font-bold tabular-nums" style="color: var(--ink-primary);">${focusState.sessionsDone}</div>
+                    <div class="text-[11px] font-semibold" style="color: var(--ink-muted);">Sessions</div>
+                  </div>
+                  <div class="surface-beige rounded-2xl px-4 py-2.5 text-center">
+                    <div class="text-lg font-bold tabular-nums" style="color: var(--accent-coffee);">${focusState.minutesDone}m</div>
+                    <div class="text-[11px] font-semibold" style="color: var(--ink-muted);">Focused</div>
+                  </div>
+                </div>
+              </section>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <!-- Create Room Card -->
+                <form id="createFocusRoomForm" class="surface-card p-6 space-y-4 flex flex-col justify-between">
+                  <div class="space-y-4">
+                    <div class="flex items-center gap-2.5">
+                      <span class="w-10 h-10 rounded-2xl flex items-center justify-center" style="background: var(--accent-rose-soft); color: var(--accent-rose);">
+                        <i data-lucide="plus-circle" class="w-5 h-5"></i>
+                      </span>
+                      <div>
+                        <h2 class="font-display text-lg font-semibold" style="color: var(--ink-primary);">Create a Room</h2>
+                        <p class="text-xs" style="color: var(--ink-muted);">Start a new timer room and share the code with buddies.</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label for="createRoomName" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Room Name</label>
+                      <input type="text" id="createRoomName" class="field-input" placeholder="e.g., Late Night Study, Coffee Sprint" maxlength="40" />
+                    </div>
+
+                    <div>
+                      <label class="block text-xs font-semibold mb-1.5" style="color: var(--ink-secondary);">Timer Length</label>
+                      <div class="grid grid-cols-4 gap-2 mb-2.5">
+                        ${[15, 25, 45, 50].map((m) => `
+                          <button type="button" data-create-min="${m}" class="py-2 rounded-xl text-xs font-semibold border transition-all tabular-nums" style="background: ${focusState.selectedCreateMin === m ? "var(--accent-coffee)" : "var(--bg-elevated)"}; color: ${focusState.selectedCreateMin === m ? "#FFFDF9" : "var(--ink-secondary)"}; border-color: ${focusState.selectedCreateMin === m ? "var(--accent-coffee)" : "var(--border-warm)"};">${m} min</button>
+                        `).join("")}
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <label for="createRoomCustomMin" class="text-xs font-semibold shrink-0" style="color: var(--ink-muted);">Custom (mins):</label>
+                        <input type="number" id="createRoomCustomMin" min="1" max="240" value="${focusState.selectedCreateMin}" class="field-input py-1.5 text-sm tabular-nums" placeholder="e.g., 35 or 90" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label for="createRoomGoal" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">What are you studying? (optional)</label>
+                      <input type="text" id="createRoomGoal" class="field-input" placeholder="e.g., Math chapter 4, coding project" maxlength="60" />
+                    </div>
+                  </div>
+
+                  <button type="submit" class="btn-primary w-full py-2.5 text-sm inline-flex items-center justify-center gap-2 mt-2">
+                    <i data-lucide="sparkles" class="w-4 h-4"></i>
+                    <span>Create &amp; Enter Room</span>
+                  </button>
+                </form>
+
+                <!-- Join Room Card -->
+                <form id="joinFocusRoomForm" class="surface-card p-6 space-y-4 flex flex-col justify-between">
+                  <div class="space-y-4">
+                    <div class="flex items-center gap-2.5">
+                      <span class="w-10 h-10 rounded-2xl flex items-center justify-center" style="background: var(--accent-sage-soft); color: var(--accent-sage);">
+                        <i data-lucide="door-open" class="w-5 h-5"></i>
+                      </span>
+                      <div>
+                        <h2 class="font-display text-lg font-semibold" style="color: var(--ink-primary);">Join a Room</h2>
+                        <p class="text-xs" style="color: var(--ink-muted);">Enter a friend's room code to study together in real time.</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label for="joinRoomCode" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Room Code</label>
+                      <input type="text" id="joinRoomCode" class="field-input uppercase tracking-wider font-semibold" placeholder="e.g., FOCUS-7K2P" required maxlength="20" />
+                    </div>
+
+                    <div>
+                      <label for="joinRoomGoal" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">What are you studying? (optional)</label>
+                      <input type="text" id="joinRoomGoal" class="field-input" placeholder="e.g., Reading notes, assignments" maxlength="60" />
+                    </div>
+
+                    <div class="p-3 rounded-2xl surface-beige text-xs" style="color: var(--ink-secondary);">
+                      Joining as <strong>${escapeHtml(user.username)}</strong> (${escapeHtml(user.role || "Buddies")}). Everyone in the same code appears live in the room sidebar.
+                    </div>
+                  </div>
+
+                  <button type="submit" class="btn-rose w-full py-2.5 text-sm inline-flex items-center justify-center gap-2 mt-2">
+                    <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    <span>Join Focus Room</span>
+                  </button>
+                </form>
+              </div>
+
+              ${focusState.recentRooms.length > 0 ? `
+                <section class="surface-card p-5 space-y-3">
+                  <h3 class="font-display text-base font-semibold" style="color: var(--ink-primary);">Recent Rooms</h3>
+                  <div class="flex flex-wrap gap-2">
+                    ${focusState.recentRooms.map((r) => `
+                      <button type="button" data-rejoin-room="${escapeHtml(r.code)}" data-rejoin-name="${escapeHtml(r.name)}" class="btn-soft px-3.5 py-2 text-xs inline-flex items-center gap-2">
+                        <i data-lucide="clock" class="w-3.5 h-3.5" style="color: var(--accent-rose);"></i>
+                        <span>${escapeHtml(r.name)}</span>
+                        <span class="px-1.5 py-0.5 rounded-md text-[10px] font-bold tracking-wider" style="background: var(--bg-elevated); color: var(--ink-muted);">${escapeHtml(r.code)}</span>
+                      </button>
+                    `).join("")}
+                  </div>
+                </section>
+              ` : ""}
+            </div>
+          `;
+        }
+
+        // Active Focus Room View: Timer + People Currently Studying Sidebar
+        const r = 94;
+        const circ = 2 * Math.PI * r;
+        const pct = focusState.durationSec > 0 ? Math.max(0, Math.min(1, focusState.remainingSec / focusState.durationSec)) : 0;
+        const offset = circ * (1 - pct);
+        const participants = getCurrentFocusParticipants();
+        const studyingCount = participants.filter((p) => p.status === "studying").length;
+
+        return `
+          <div class="view-enter space-y-5">
+            <!-- Room Header -->
+            <section class="surface-card p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center gap-3 min-w-0">
+                <span class="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0" style="background: var(--accent-sage-soft); color: var(--accent-sage);">
+                  <i data-lucide="timer" class="w-5 h-5"></i>
+                </span>
+                <div class="min-w-0">
+                  <h1 class="font-display text-xl sm:text-2xl font-semibold truncate" style="color: var(--ink-primary);">${escapeHtml(focusState.roomName)}</h1>
+                  <div class="flex flex-wrap items-center gap-2 mt-0.5">
+                    <span class="text-xs font-bold tracking-wider px-2.5 py-0.5 rounded-full surface-beige" style="color: var(--accent-coffee);">${escapeHtml(focusState.roomCode)}</span>
+                    <button type="button" id="copyFocusCodeBtn" class="text-xs font-semibold inline-flex items-center gap-1 hover:underline" style="color: var(--accent-rose);">
+                      <i data-lucide="copy" class="w-3 h-3"></i><span>Copy Code</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <button type="button" id="leaveFocusRoomBtn" class="btn-soft px-3.5 py-2 text-xs inline-flex items-center gap-1.5" style="color: var(--accent-rose);">
+                <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+                <span>Leave Room</span>
+              </button>
+            </section>
+
+            <!-- Main 2-Column Layout: Timer Left + People Studying Right -->
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+              <!-- Timer Column -->
+              <section class="lg:col-span-7 xl:col-span-8 surface-card p-6 sm:p-8 flex flex-col items-center text-center space-y-6">
+                <!-- Mode Pills -->
+                <div class="flex flex-wrap items-center justify-center gap-2">
+                  <button type="button" data-focus-mode="focus" data-focus-min="25" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all" style="background: ${focusState.mode === "focus" ? "var(--accent-coffee)" : "var(--bg-elevated)"}; color: ${focusState.mode === "focus" ? "#FFFDF9" : "var(--ink-secondary)"}; border-color: ${focusState.mode === "focus" ? "var(--accent-coffee)" : "var(--border-warm)"};">Focus 25m</button>
+                  <button type="button" data-focus-mode="deep" data-focus-min="50" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all" style="background: ${focusState.mode === "deep" ? "var(--accent-coffee)" : "var(--bg-elevated)"}; color: ${focusState.mode === "deep" ? "#FFFDF9" : "var(--ink-secondary)"}; border-color: ${focusState.mode === "deep" ? "var(--accent-coffee)" : "var(--border-warm)"};">Deep 50m</button>
+                  <button type="button" data-focus-mode="break" data-focus-min="5" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all" style="background: ${focusState.mode === "break" ? "var(--accent-sage)" : "var(--bg-elevated)"}; color: ${focusState.mode === "break" ? "#FFFDF9" : "var(--ink-secondary)"}; border-color: ${focusState.mode === "break" ? "var(--accent-sage)" : "var(--border-warm)"};">Break 5m</button>
+                  <form id="customFocusMinForm" class="inline-flex items-center gap-1">
+                    <input type="number" id="customFocusMinInput" min="1" max="240" value="${Math.round(focusState.durationSec / 60)}" class="w-14 px-2 py-1 text-xs text-center font-semibold rounded-full border tabular-nums" style="background: var(--bg-elevated); border-color: var(--border-strong); color: var(--ink-primary);" aria-label="Custom minutes" />
+                    <button type="submit" class="px-2.5 py-1.5 rounded-full text-xs font-semibold btn-soft">Set min</button>
+                  </form>
+                </div>
+
+                <!-- Circular Timer Ring -->
+                <div class="relative w-56 h-56 sm:w-64 sm:h-64 flex items-center justify-center">
+                  <svg class="w-full h-full -rotate-90" viewBox="0 0 220 220" aria-hidden="true">
+                    <circle cx="110" cy="110" r="${r}" fill="none" stroke="var(--bg-beige)" stroke-width="10"></circle>
+                    <circle id="focusTimerRing" cx="110" cy="110" r="${r}" fill="none" stroke="${focusState.mode === "break" ? "var(--accent-sage)" : "var(--accent-rose)"}" stroke-width="10" stroke-linecap="round" stroke-dasharray="${circ}" stroke-dashoffset="${offset}" style="transition: stroke-dashoffset 0.5s linear;"></circle>
+                  </svg>
+                  <div class="absolute inset-0 flex flex-col items-center justify-center px-4">
+                    <div id="focusTimerDisplay" class="font-display text-5xl sm:text-6xl font-semibold tabular-nums tracking-tight" style="color: var(--ink-primary);">${formatFocusClock(focusState.remainingSec)}</div>
+                    <div id="focusTimerStatusLabel" class="text-xs font-semibold mt-2" style="color: var(--ink-muted);">${focusState.running ? (focusState.mode === "break" ? "Recharging on break" : "Deep focus in progress") : "Ready when you are"}</div>
+                  </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="flex items-center justify-center gap-3">
+                  <button type="button" id="focusToggleBtn" class="btn-primary px-7 py-3 text-sm inline-flex items-center gap-2">
+                    <i data-lucide="${focusState.running ? "pause" : "play"}" class="w-4 h-4"></i>
+                    <span>${focusState.running ? "Pause" : (focusState.remainingSec < focusState.durationSec && focusState.remainingSec > 0 ? "Resume" : "Start Focus")}</span>
+                  </button>
+                  <button type="button" id="focusResetBtn" class="btn-soft px-5 py-3 text-sm inline-flex items-center gap-1.5">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                    <span>Reset</span>
+                  </button>
+                </div>
+
+                <!-- Studying Goal Input -->
+                <form id="focusGoalForm" class="w-full max-w-md flex items-center gap-2 pt-2 border-t" style="border-color: var(--border-warm);">
+                  <input type="text" id="focusGoalInput" value="${escapeHtml(focusState.goal)}" class="field-input flex-1 text-sm" placeholder="What are you studying right now?" maxlength="60" />
+                  <button type="submit" class="btn-soft px-4 py-2.5 text-xs shrink-0">Update</button>
+                </form>
+
+                <!-- Session Totals -->
+                <div class="flex items-center justify-center gap-6 text-xs" style="color: var(--ink-muted);">
+                  <span><strong class="tabular-nums" style="color: var(--ink-primary);">${focusState.sessionsDone}</strong> sessions today</span>
+                  <span><strong class="tabular-nums" style="color: var(--ink-primary);">${focusState.minutesDone}</strong> mins focused</span>
+                </div>
+              </section>
+
+              <!-- Side Panel: People Currently Studying -->
+              <aside class="lg:col-span-5 xl:col-span-4 surface-card p-5 space-y-4">
+                <div class="flex items-center justify-between gap-2">
+                  <div>
+                    <h2 class="font-display text-lg font-semibold" style="color: var(--ink-primary);">Studying in Room</h2>
+                    <p id="focusParticipantCount" class="text-xs font-semibold mt-0.5" style="color: var(--accent-sage);">${studyingCount > 0 ? `${studyingCount} studying · ${participants.length} in room` : `${participants.length} in room`}</p>
+                  </div>
+                  <span class="w-8 h-8 rounded-xl flex items-center justify-center surface-beige" style="color: var(--accent-coffee);">
+                    <i data-lucide="users" class="w-4 h-4"></i>
+                  </span>
+                </div>
+
+                <div id="focusParticipantsList" class="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                  ${renderFocusParticipantsHtml()}
+                </div>
+
+                <div class="p-3.5 rounded-2xl surface-beige space-y-2">
+                  <div class="text-xs font-semibold" style="color: var(--ink-primary);">Invite buddies to this room</div>
+                  <p class="text-[11px] leading-relaxed" style="color: var(--ink-secondary);">Share code <strong>${escapeHtml(focusState.roomCode)}</strong> — anyone who joins from their Focus tab shows up live here.</p>
+                  <button type="button" id="copyFocusCodeSideBtn" class="btn-soft w-full py-2 text-xs inline-flex items-center justify-center gap-1.5" style="background: var(--bg-elevated);">
+                    <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                    <span>Copy Room Code (${escapeHtml(focusState.roomCode)})</span>
+                  </button>
+                </div>
+              </aside>
+            </div>
           </div>
         `;
       }
@@ -2442,7 +3039,7 @@ on conflict (id) do nothing;`;
                   <div>
                     <label for="profileRoleInput" class="block text-xs font-semibold mb-1.5" style="color: var(--ink-secondary);">Space Role</label>
                     <select id="profileRoleInput" class="field-input">
-                      ${["Me", "Queen Ari", "Buddy"].map((r) => `<option value="${r}" ${user.role === r ? "selected" : ""}>${r}</option>`).join("")}
+                      ${["Ari", "Me", "Buddies"].map((r) => `<option value="${r}" ${user.role === r ? "selected" : ""}>${r}</option>`).join("")}
                     </select>
                   </div>
                 </div>
@@ -2736,7 +3333,7 @@ on conflict (id) do nothing;`;
             <div class="px-6 pb-6">
               <div class="flex items-end justify-between gap-3 -mt-10 relative">
                 <img src="${escapeHtml(member.avatar || DEFAULT_ASSETS.me)}" alt="${escapeHtml(member.username)}" class="w-20 h-20 rounded-2xl object-cover border-4 shadow-md" style="border-color: var(--bg-card);" />
-                <span class="px-3 py-1 rounded-full text-xs font-semibold surface-beige" style="color: var(--ink-secondary);">${escapeHtml(member.role || "Friend")}</span>
+                <span class="px-3 py-1 rounded-full text-xs font-semibold surface-beige" style="color: var(--ink-secondary);">${escapeHtml(member.role || "Buddies")}</span>
               </div>
               <div class="mt-3">
                 <h2 class="font-display text-xl font-semibold" style="color: var(--ink-primary);">${escapeHtml(member.username)}</h2>
@@ -3218,6 +3815,117 @@ on conflict (id) do nothing;`;
             showToast(`New invite code generated: ${state.inviteCode}`);
             renderApp();
           });
+        }
+
+
+        // Focus Room Lobby & Active Room events
+        const createRoomForm = document.getElementById("createFocusRoomForm");
+        if (createRoomForm) {
+          const customMinInput = document.getElementById("createRoomCustomMin");
+          const syncPresetHighlight = (mins) => {
+            document.querySelectorAll("[data-create-min]").forEach((b) => {
+              const active = Number(b.getAttribute("data-create-min")) === mins;
+              b.style.background = active ? "var(--accent-coffee)" : "var(--bg-elevated)";
+              b.style.color = active ? "#FFFDF9" : "var(--ink-secondary)";
+              b.style.borderColor = active ? "var(--accent-coffee)" : "var(--border-warm)";
+            });
+          };
+          document.querySelectorAll("[data-create-min]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const mins = Number(btn.getAttribute("data-create-min")) || 25;
+              focusState.selectedCreateMin = mins;
+              if (customMinInput) customMinInput.value = String(mins);
+              syncPresetHighlight(mins);
+            });
+          });
+          if (customMinInput) {
+            customMinInput.addEventListener("input", () => {
+              const mins = Number(customMinInput.value);
+              if (mins >= 1 && mins <= 240) {
+                focusState.selectedCreateMin = mins;
+                syncPresetHighlight(mins);
+              }
+            });
+          }
+          createRoomForm.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const roomName = (document.getElementById("createRoomName")?.value || "").trim() || "Cozy Study Room";
+            const goal = (document.getElementById("createRoomGoal")?.value || "").trim();
+            const rawMin = customMinInput ? Number(customMinInput.value) : focusState.selectedCreateMin;
+            const durationMin = (rawMin >= 1 && rawMin <= 240) ? Math.round(rawMin) : 25;
+            focusState.selectedCreateMin = durationMin;
+            const code = generateFocusRoomCode();
+            joinFocusRoom(code, roomName, durationMin, goal);
+          });
+        }
+        const joinRoomForm = document.getElementById("joinFocusRoomForm");
+        if (joinRoomForm) {
+          joinRoomForm.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const code = document.getElementById("joinRoomCode").value.trim();
+            const goal = document.getElementById("joinRoomGoal").value.trim();
+            joinFocusRoom(code, "", 25, goal);
+          });
+        }
+        document.querySelectorAll("[data-rejoin-room]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            joinFocusRoom(btn.getAttribute("data-rejoin-room"), btn.getAttribute("data-rejoin-name") || "", 25, focusState.goal);
+          });
+        });
+
+        const focusToggleBtn = document.getElementById("focusToggleBtn");
+        if (focusToggleBtn) focusToggleBtn.addEventListener("click", () => toggleFocusTimer());
+        const focusResetBtn = document.getElementById("focusResetBtn");
+        if (focusResetBtn) {
+          focusResetBtn.addEventListener("click", () => {
+            stopFocusTimerInterval();
+            focusState.running = false;
+            focusState.remainingSec = focusState.durationSec;
+            updateFocusTimerDOM();
+            broadcastFocusPresence();
+          });
+        }
+        const leaveFocusBtn = document.getElementById("leaveFocusRoomBtn");
+        if (leaveFocusBtn) leaveFocusBtn.addEventListener("click", () => leaveFocusRoom(false));
+
+        const copyCodeHandler = () => {
+          if (!focusState.roomCode) return;
+          if (navigator.clipboard) navigator.clipboard.writeText(focusState.roomCode).catch(() => {});
+          showToast(`Copied room code: ${focusState.roomCode}`);
+        };
+        const copyFocusBtn = document.getElementById("copyFocusCodeBtn");
+        if (copyFocusBtn) copyFocusBtn.addEventListener("click", copyCodeHandler);
+        const copyFocusSideBtn = document.getElementById("copyFocusCodeSideBtn");
+        if (copyFocusSideBtn) copyFocusSideBtn.addEventListener("click", copyCodeHandler);
+
+        document.querySelectorAll("[data-focus-mode]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            setFocusTimerMode(btn.getAttribute("data-focus-mode"), Number(btn.getAttribute("data-focus-min")) || 25);
+          });
+        });
+        const customFocusForm = document.getElementById("customFocusMinForm");
+        if (customFocusForm) {
+          customFocusForm.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const mins = Number(document.getElementById("customFocusMinInput").value);
+            if (!mins || mins < 1 || mins > 240) {
+              showToast("Enter between 1 and 240 minutes.");
+              return;
+            }
+            setFocusTimerMode("custom", mins);
+          });
+        }
+        const focusGoalForm = document.getElementById("focusGoalForm");
+        if (focusGoalForm) {
+          focusGoalForm.addEventListener("submit", (e) => {
+            e.preventDefault();
+            focusState.goal = document.getElementById("focusGoalInput").value.trim();
+            broadcastFocusPresence();
+            showToast("Study status updated!");
+          });
+        }
+        if (currentView === "focus" && focusState.roomCode) {
+          refreshFocusParticipantsDOM();
         }
 
         // Profile view specific
