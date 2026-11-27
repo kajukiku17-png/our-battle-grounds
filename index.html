@@ -1510,19 +1510,6 @@ on conflict (id) do nothing;`;
                   <button type="submit" class="btn-primary w-full py-2.5 text-sm">Create Account & Enter</button>
                 </form>
               `}
-
-              <!-- Quick Profile Entry (Local Workspace) -->
-              <div class="pt-3 border-t space-y-2" style="border-color: var(--border-warm);">
-                <div class="text-[11px] font-semibold" style="color: var(--ink-muted);">Quick enter as existing profile:</div>
-                <div class="flex flex-wrap gap-2">
-                  ${state.users.map((u) => `
-                    <button type="button" data-quick-login="${escapeHtml(u.id)}" class="inline-flex items-center gap-2 pl-1.5 pr-3 py-1 rounded-full border text-xs font-semibold transition-colors hover:border-[var(--accent-rose)]" style="background: var(--bg-elevated); border-color: var(--border-warm); color: var(--ink-primary);">
-                      <img src="${escapeHtml(u.avatar || DEFAULT_ASSETS.me)}" alt="${escapeHtml(u.username)}" class="w-5 h-5 rounded-full object-cover" />
-                      <span>${escapeHtml(u.username)}</span>
-                    </button>
-                  `).join("")}
-                </div>
-              </div>
             </div>
           </div>
         `;
@@ -1539,17 +1526,7 @@ on conflict (id) do nothing;`;
           });
         });
 
-        gate.querySelectorAll("[data-quick-login]").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            const uid = btn.getAttribute("data-quick-login");
-            state.activeUserId = uid;
-            state.isAuthenticated = true;
-            saveState();
-            const u = getUserById(uid);
-            showToast(`Welcome, ${u ? u.username : "friend"} ♡`);
-            renderApp(true);
-          });
-        });
+        
 
         const signInForm = document.getElementById("gateSignInForm");
         if (signInForm) {
@@ -1575,7 +1552,11 @@ on conflict (id) do nothing;`;
             }
             const found = state.users.find((u) => (u.email || "").toLowerCase() === email);
             if (!found) {
-              showToast("No account found for that email — create an account or pick a profile below.");
+              showToast("No account found for that email — please create an account first.");
+              return;
+            }
+            if (found.password && found.password !== password) {
+              showToast("Incorrect password for this account.");
               return;
             }
             state.activeUserId = found.id;
@@ -1621,6 +1602,7 @@ on conflict (id) do nothing;`;
               username,
               email,
               role,
+              password,
               bio: "Ready to track daily wins together.",
               avatar: DEFAULT_ASSETS.me,
               cover: DEFAULT_ASSETS.cover,
@@ -2342,7 +2324,7 @@ on conflict (id) do nothing;`;
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h2 class="font-display text-xl font-semibold" style="color: var(--ink-primary);">Friends List (${state.users.length})</h2>
-                  <p class="text-xs mt-0.5" style="color: var(--ink-secondary);">Add or remove friends, peek at their progress, or switch dashboards.</p>
+                  <p class="text-xs mt-0.5" style="color: var(--ink-secondary);">Add or remove friends, peek at their progress, and send cheers.</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                   <div class="relative min-w-[160px] flex-1 sm:flex-initial">
@@ -2390,7 +2372,7 @@ on conflict (id) do nothing;`;
                       </div>
                       <div class="flex items-center gap-2 pt-1">
                         <button type="button" data-peek-user="${escapeHtml(member.id)}" class="btn-soft flex-1 py-2 text-xs text-center">View Progress</button>
-                        ${!isMe ? `<button type="button" data-switch-user="${escapeHtml(member.id)}" class="btn-primary flex-1 py-2 text-xs text-center">Switch Dashboard</button>` : `<button type="button" data-jump="dashboard" class="btn-primary flex-1 py-2 text-xs text-center">My Dashboard</button>`}
+                        ${!isMe ? `<button type="button" data-cheer-user="${escapeHtml(member.id)}" class="btn-rose flex-1 py-2 text-xs text-center inline-flex items-center justify-center gap-1"><i data-lucide="heart" class="w-3.5 h-3.5"></i><span>Cheer (${member.cheers || 0})</span></button>` : `<button type="button" data-jump="dashboard" class="btn-primary flex-1 py-2 text-xs text-center">My Dashboard</button>`}
                       </div>
                     </div>
                   `;
@@ -2754,7 +2736,7 @@ on conflict (id) do nothing;`;
             <div class="px-6 pb-6">
               <div class="flex items-end justify-between gap-3 -mt-10 relative">
                 <img src="${escapeHtml(member.avatar || DEFAULT_ASSETS.me)}" alt="${escapeHtml(member.username)}" class="w-20 h-20 rounded-2xl object-cover border-4 shadow-md" style="border-color: var(--bg-card);" />
-                <button type="button" id="peekSwitchBtn" class="btn-primary px-3.5 py-2 text-xs">Switch to ${escapeHtml(member.username)}'s View</button>
+                <span class="px-3 py-1 rounded-full text-xs font-semibold surface-beige" style="color: var(--ink-secondary);">${escapeHtml(member.role || "Friend")}</span>
               </div>
               <div class="mt-3">
                 <h2 class="font-display text-xl font-semibold" style="color: var(--ink-primary);">${escapeHtml(member.username)}</h2>
@@ -2783,235 +2765,50 @@ on conflict (id) do nothing;`;
             </div>
           </div>
         `);
-        document.getElementById("peekSwitchBtn").addEventListener("click", () => {
-          state.activeUserId = member.id;
-          saveState();
-          closeModal();
-          showToast(`Switched to ${member.username}'s dashboard`);
-          renderApp();
-        });
+
       }
 
-      function openAccountSwitcherModal(activeTab = "switch") {
+      function openAccountSwitcherModal() {
         const active = getActiveUser();
+        const st = getUserStats(active.id, "all");
         openModal(`
-          <div class="surface-card w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4">
+          <div class="surface-card w-full max-w-sm p-6 space-y-5">
             <div class="flex items-center justify-between">
-              <h2 class="font-display text-xl font-semibold" style="color: var(--ink-primary);">Account & Profiles</h2>
+              <h2 class="font-display text-xl font-semibold" style="color: var(--ink-primary);">Your Account</h2>
               <button type="button" data-close-modal class="p-1.5 rounded-xl hover:bg-black/5" aria-label="Close"><i data-lucide="x" class="w-5 h-5" style="color: var(--ink-muted);"></i></button>
             </div>
-
-            <div class="grid grid-cols-3 p-1 rounded-2xl surface-beige text-xs font-semibold">
-              <button type="button" data-auth-tab="switch" class="py-1.5 rounded-xl transition-colors" style="${activeTab === "switch" ? "background: var(--bg-card); color: var(--ink-primary);" : "color: var(--ink-secondary);"}">Profiles</button>
-              <button type="button" data-auth-tab="signin" class="py-1.5 rounded-xl transition-colors" style="${activeTab === "signin" ? "background: var(--bg-card); color: var(--ink-primary);" : "color: var(--ink-secondary);"}">Sign In</button>
-              <button type="button" data-auth-tab="signup" class="py-1.5 rounded-xl transition-colors" style="${activeTab === "signup" ? "background: var(--bg-card); color: var(--ink-primary);" : "color: var(--ink-secondary);"}">Sign Up</button>
+            <div class="p-4 rounded-2xl surface-beige flex items-center gap-3.5">
+              <img src="${escapeHtml(active.avatar || DEFAULT_ASSETS.me)}" alt="${escapeHtml(active.username)}" class="w-12 h-12 rounded-2xl object-cover border shrink-0" style="border-color: var(--border-warm);" />
+              <div class="min-w-0">
+                <div class="text-base font-semibold truncate" style="color: var(--ink-primary);">${escapeHtml(active.username)}</div>
+                <div class="text-xs truncate" style="color: var(--ink-muted);">${escapeHtml(active.email || active.role || "Member")}</div>
+                <div class="text-xs font-semibold mt-0.5 tabular-nums" style="color: var(--accent-rose);">${st.completed}/${st.total} tasks completed</div>
+              </div>
             </div>
-
-            ${activeTab === "switch" ? `
-              <p class="text-xs" style="color: var(--ink-secondary);">
-                Switch between profiles in this space to experience each person's dashboard and see live leaderboard updates.
-              </p>
-              <div class="space-y-2.5">
-                ${state.users.map((u) => {
-                  const st = getUserStats(u.id, "all");
-                  const isCur = u.id === active.id;
-                  return `
-                    <button type="button" data-modal-switch="${escapeHtml(u.id)}" class="w-full p-3 rounded-2xl border flex items-center justify-between gap-3 text-left transition-colors ${isCur ? "surface-beige" : "hover:bg-black/[0.02]"}" style="border-color: ${isCur ? "var(--accent-rose)" : "var(--border-warm)"};">
-                      <div class="flex items-center gap-3 min-w-0">
-                        <img src="${escapeHtml(u.avatar || DEFAULT_ASSETS.me)}" alt="${escapeHtml(u.username)}" class="w-10 h-10 rounded-full object-cover border shrink-0" style="border-color: var(--border-warm);" />
-                        <div class="min-w-0">
-                          <div class="text-sm font-semibold truncate" style="color: var(--ink-primary);">${escapeHtml(u.username)}</div>
-                          <div class="text-xs tabular-nums" style="color: var(--ink-muted);">${escapeHtml(u.role || "Member")} · ${st.completed}/${st.total} done</div>
-                        </div>
-                      </div>
-                      ${isCur ? `<span class="text-xs font-semibold px-2.5 py-1 rounded-full" style="background: var(--accent-rose-soft); color: var(--accent-rose);">Active</span>` : `<i data-lucide="arrow-right" class="w-4 h-4" style="color: var(--ink-muted);"></i>`}
-                    </button>
-                  `;
-                }).join("")}
-              </div>
-              <div class="pt-2 border-t flex flex-wrap items-center justify-between gap-2" style="border-color: var(--border-warm);">
-                <button type="button" id="modalOpenJoinBtn" class="btn-soft px-3 py-2 text-xs inline-flex items-center gap-1.5">
-                  <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
-                  <span>Add Friend</span>
-                </button>
-                <button type="button" id="modalOpenCloudBtn" class="btn-soft px-3 py-2 text-xs inline-flex items-center gap-1.5">
-                  <i data-lucide="database" class="w-3.5 h-3.5"></i>
-                  <span>Cloud Sync</span>
-                </button>
-                <button type="button" id="modalSignOutBtn" class="btn-soft px-3 py-2 text-xs inline-flex items-center gap-1.5" style="color: var(--accent-rose);">
-                  <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
-                  <span>Sign Out</span>
-                </button>
-              </div>
-            ` : activeTab === "signin" ? `
-              <form id="authSignInForm" class="space-y-3">
-                <div>
-                  <label for="signInEmail" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Email</label>
-                  <input type="email" id="signInEmail" class="field-input" placeholder="me@ourbattlegrounds.app" required />
-                </div>
-                <div>
-                  <label for="signInPassword" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Password</label>
-                  <input type="password" id="signInPassword" class="field-input" placeholder="Enter your password" required minlength="4" />
-                </div>
-                <p class="text-[11px]" style="color: var(--ink-muted);">
-                  ${supabaseConnected ? "Authenticates directly via your connected Supabase Auth project." : "Signs into your matching local profile (or connect Supabase for multi-device Auth)."}
-                </p>
-                <button type="submit" class="btn-primary w-full py-2.5 text-sm">Sign In with Email</button>
-                <div class="flex items-center gap-3 py-1">
-                  <span class="h-px flex-1" style="background: var(--border-warm);"></span>
-                  <span class="text-[11px] font-semibold uppercase" style="color: var(--ink-muted);">or</span>
-                  <span class="h-px flex-1" style="background: var(--border-warm);"></span>
-                </div>
-                <button type="button" data-google-oauth class="w-full py-2.5 px-4 rounded-[14px] border text-sm font-semibold inline-flex items-center justify-center gap-2.5 transition-colors hover:bg-black/[0.02]" style="background: var(--bg-elevated); border-color: var(--border-strong); color: var(--ink-primary);">
-                  ${GOOGLE_G_SVG}
-                  <span>Continue with Google</span>
-                </button>
-              </form>
-            ` : `
-              <form id="authSignUpForm" class="space-y-3">
-                <div>
-                  <label for="signUpUsername" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Username</label>
-                  <input type="text" id="signUpUsername" class="field-input" placeholder="e.g., Alex" required maxlength="32" />
-                </div>
-                <div>
-                  <label for="signUpEmail" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Email</label>
-                  <input type="email" id="signUpEmail" class="field-input" placeholder="alex@example.com" required />
-                </div>
-                <div>
-                  <label for="signUpPassword" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Password</label>
-                  <input type="password" id="signUpPassword" class="field-input" placeholder="At least 6 characters" required minlength="6" />
-                </div>
-                <div>
-                  <label for="signUpRole" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Role</label>
-                  <select id="signUpRole" class="field-input">
-                    <option value="Partner">Partner</option>
-                    <option value="Friend">Friend</option>
-                    <option value="Me">Me</option>
-                  </select>
-                </div>
-                <button type="submit" class="btn-primary w-full py-2.5 text-sm">Create Account</button>
-                <div class="flex items-center gap-3 py-1">
-                  <span class="h-px flex-1" style="background: var(--border-warm);"></span>
-                  <span class="text-[11px] font-semibold uppercase" style="color: var(--ink-muted);">or</span>
-                  <span class="h-px flex-1" style="background: var(--border-warm);"></span>
-                </div>
-                <button type="button" data-google-oauth class="w-full py-2.5 px-4 rounded-[14px] border text-sm font-semibold inline-flex items-center justify-center gap-2.5 transition-colors hover:bg-black/[0.02]" style="background: var(--bg-elevated); border-color: var(--border-strong); color: var(--ink-primary);">
-                  ${GOOGLE_G_SVG}
-                  <span>Continue with Google</span>
-                </button>
-              </form>
-            `}
+            <div class="space-y-2">
+              <button type="button" id="modalGoProfileBtn" class="btn-soft w-full py-2.5 px-4 text-sm inline-flex items-center justify-center gap-2">
+                <i data-lucide="user-circle" class="w-4 h-4"></i><span>Customize Profile</span>
+              </button>
+              <button type="button" id="modalOpenJoinBtn" class="btn-soft w-full py-2.5 px-4 text-sm inline-flex items-center justify-center gap-2">
+                <i data-lucide="user-plus" class="w-4 h-4"></i><span>Add Friend to Space</span>
+              </button>
+              <button type="button" id="modalOpenCloudBtn" class="btn-soft w-full py-2.5 px-4 text-sm inline-flex items-center justify-center gap-2">
+                <i data-lucide="database" class="w-4 h-4"></i><span>Cloud Sync (Supabase)</span>
+              </button>
+              <button type="button" id="modalSignOutBtn" class="btn-rose w-full py-2.5 px-4 text-sm inline-flex items-center justify-center gap-2">
+                <i data-lucide="log-out" class="w-4 h-4"></i><span>Sign Out</span>
+              </button>
+            </div>
           </div>
         `);
-
-        document.querySelectorAll("[data-auth-tab]").forEach((btn) => {
-          btn.addEventListener("click", () => openAccountSwitcherModal(btn.getAttribute("data-auth-tab")));
-        });
-
-        document.querySelectorAll("[data-modal-switch]").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            const uid = btn.getAttribute("data-modal-switch");
-            state.activeUserId = uid;
-            saveState();
-            closeModal();
-            const u = getUserById(uid);
-            showToast(`Signed in as ${u ? u.username : "Member"}`);
-            renderApp(false);
-          });
-        });
-
-        const joinBtn = document.getElementById("modalOpenJoinBtn");
-        if (joinBtn) joinBtn.addEventListener("click", () => openJoinFriendModal());
-        const cloudBtn = document.getElementById("modalOpenCloudBtn");
-        if (cloudBtn) cloudBtn.addEventListener("click", () => openSupabaseModal());
-        const signOutBtn = document.getElementById("modalSignOutBtn");
-        if (signOutBtn) signOutBtn.addEventListener("click", () => signOutUser());
-
-        const signInForm = document.getElementById("authSignInForm");
-        if (signInForm) {
-          signInForm.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const email = document.getElementById("signInEmail").value.trim().toLowerCase();
-            const password = document.getElementById("signInPassword").value;
-            if (supabaseConnected && supabaseClient) {
-              const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-              if (error) {
-                showToast(error.message || "Sign in failed.");
-                return;
-              }
-              if (data && data.user) {
-                state.activeUserId = data.user.id;
-                await fetchSupabaseWorkspace();
-                closeModal();
-                showToast("Signed in via Supabase!");
-                return;
-              }
-            }
-            const found = state.users.find((u) => (u.email || "").toLowerCase() === email);
-            if (!found) {
-              showToast("No account found with that email — try Sign Up!");
-              return;
-            }
-            state.activeUserId = found.id;
-            saveState();
-            closeModal();
-            showToast(`Welcome back, ${found.username}!`);
-            renderApp(false);
-          });
-        }
-
-        const signUpForm = document.getElementById("authSignUpForm");
-        if (signUpForm) {
-          signUpForm.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const username = document.getElementById("signUpUsername").value.trim();
-            const email = document.getElementById("signUpEmail").value.trim().toLowerCase();
-            const password = document.getElementById("signUpPassword").value;
-            const role = document.getElementById("signUpRole").value;
-            let newId = generateId("u");
-            if (supabaseConnected && supabaseClient) {
-              const { data, error } = await supabaseClient.auth.signUp({ email, password });
-              if (error) {
-                showToast(error.message || "Sign up failed.");
-                return;
-              }
-              if (data && data.user) {
-                newId = data.user.id;
-                await supabaseClient.from("profiles").upsert({
-                  id: newId,
-                  username,
-                  role,
-                  bio: "Ready to track daily wins together.",
-                  theme: "cream-latte"
-                });
-              }
-            }
-            if (!supabaseConnected && state.users.some((u) => (u.email || "").toLowerCase() === email)) {
-              showToast("An account with this email already exists — try Sign In.");
-              return;
-            }
-            const newUser = {
-              id: newId,
-              username,
-              email,
-              role,
-              bio: "Ready to track daily wins together.",
-              avatar: DEFAULT_ASSETS.friend,
-              cover: DEFAULT_ASSETS.cover,
-              theme: "cream-latte",
-              cheers: 0
-            };
-            state.users.push(newUser);
-            state.activeUserId = newId;
-            saveState();
-            closeModal();
-            showToast(`Account created for ${username}!`);
-            renderApp(false);
-          });
-        }
+        document.getElementById("modalGoProfileBtn").addEventListener("click", () => { closeModal(); currentView = "profile"; renderApp(true); });
+        document.getElementById("modalOpenJoinBtn").addEventListener("click", () => openJoinFriendModal());
+        document.getElementById("modalOpenCloudBtn").addEventListener("click", () => openSupabaseModal());
+        document.getElementById("modalSignOutBtn").addEventListener("click", () => signOutUser());
       }
 
-      function openJoinFriendModal(prefillCode = "") {
+      function openJoinFriendModal(prefillCode) {
+        const initialInviteCode = escapeHtml(prefillCode || state.inviteCode || "");
         openModal(`
           <div class="surface-card w-full max-w-md p-6 space-y-4">
             <div class="flex items-center justify-between">
@@ -3021,7 +2818,7 @@ on conflict (id) do nothing;`;
             <form id="joinFriendForm" class="space-y-3.5">
               <div>
                 <label for="joinInviteCodeInput" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Invitation Code</label>
-                <input type="text" id="joinInviteCodeInput" class="field-input font-mono uppercase" value="${escapeHtml(prefillCode || state.inviteCode)}" required />
+                <input type="text" id="joinInviteCodeInput" class="field-input font-mono uppercase" value="${initialInviteCode}" required />
               </div>
               <div>
                 <label for="joinNameInput" class="block text-xs font-semibold mb-1" style="color: var(--ink-secondary);">Display Name</label>
@@ -3062,7 +2859,7 @@ on conflict (id) do nothing;`;
           const name = document.getElementById("joinNameInput").value.trim();
           const role = document.getElementById("joinRoleInput").value;
           const bio = document.getElementById("joinBioInput").value.trim();
-          if (code !== state.inviteCode.toUpperCase()) {
+          if (code !== (state.inviteCode || "").toUpperCase()) {
             showToast(`Invite code did not match (${state.inviteCode}).`);
             return;
           }
@@ -3078,8 +2875,10 @@ on conflict (id) do nothing;`;
             cheers: 1
           };
           state.users.push(newUser);
-          state.activeUserId = newUser.id;
-          state.isAuthenticated = true;
+          if (!state.isAuthenticated) {
+            state.activeUserId = newUser.id;
+            state.isAuthenticated = true;
+          }
           // Give them one starter welcome task
           state.tasks.unshift({
             id: generateId("t"),
@@ -3097,9 +2896,8 @@ on conflict (id) do nothing;`;
           });
           saveState();
           closeModal();
-          showToast(`${name} joined ${state.spaceName}!`);
-          currentView = "dashboard";
-          renderApp();
+          showToast(`${name} was added to your Friends List!`);
+          renderApp(false);
         });
       }
 
@@ -3295,17 +3093,7 @@ on conflict (id) do nothing;`;
           });
         }
 
-        document.querySelectorAll("[data-switch-user]").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            const uid = btn.getAttribute("data-switch-user");
-            state.activeUserId = uid;
-            saveState();
-            const u = getUserById(uid);
-            showToast(`Switched to ${u ? u.username : "Member"}'s dashboard`);
-            currentView = "dashboard";
-            renderApp();
-          });
-        });
+
 
         // Dashboard specific
         const dashAdd = document.getElementById("dashAddTaskBtn");
